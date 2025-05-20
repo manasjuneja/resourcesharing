@@ -19,7 +19,7 @@ type RegisterRequest struct {
 	Email    string       `json:"email"`
 	Password string       `json:"password"`
 	Name     string       `json:"name"`
-	Role     models.UserRole `json:"role"`
+	Role     models.Role `json:"role"`
 }
 
 type LoginRequest struct {

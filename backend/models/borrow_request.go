@@ -2,27 +2,18 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
-)
-
-type RequestStatus string
-
-const (
-    StatusPending  RequestStatus = "pending"
-    StatusApproved RequestStatus = "approved"
-    StatusDenied   RequestStatus = "denied"
-    StatusReturned RequestStatus = "returned"
 )
 
 type BorrowRequest struct {
-    gorm.Model
-    ItemID      uint          `gorm:"not null" json:"itemId"`
-    Item        Item          `json:"item,omitempty"`
-    BuyerID     uint          `gorm:"not null" json:"buyerId"`
-    Buyer       User          `json:"buyer,omitempty"`
-    Status      RequestStatus `gorm:"not null;default:'pending'" json:"status"`
-    StartDate   time.Time     `json:"startDate"`
-    EndDate     time.Time     `json:"endDate"`
-    Message     string        `json:"message"`
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	ItemID    uint      `json:"itemId" gorm:"not null"`
+	Item      Item      `json:"item" gorm:"foreignKey:ItemID"`
+	BuyerID   uint      `json:"buyerId" gorm:"not null"`
+	Buyer     User      `json:"buyer" gorm:"foreignKey:BuyerID"`
+	Status    Status    `json:"status" gorm:"not null"`
+	StartDate time.Time `json:"startDate" gorm:"not null"`
+	EndDate   time.Time `json:"endDate" gorm:"not null"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }

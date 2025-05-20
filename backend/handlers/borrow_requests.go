@@ -120,176 +120,138 @@ func CreateBorrowRequest(db *gorm.DB) http.HandlerFunc {
 }
 
 func ApproveBorrowRequest(db *gorm.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Get the user ID from the context
-        userID, ok := middleware.GetUserIDFromContext(r)
-        if !ok {
-            log.Println("User ID not found in context")
-            http.Error(w, "User ID not found in context", http.StatusUnauthorized)
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get the user ID from the context
+		userID, ok := middleware.GetUserIDFromContext(r)
+		if !ok {
+			log.Println("User ID not found in context")
+			http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+			return
+		}
 
-        // Get the borrow request ID from the URL
-        vars := mux.Vars(r)
-        idStr := vars["id"]
-        log.Printf("Request ID from URL: %s", idStr)
-        
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-            log.Printf("Invalid borrow request ID: %v", err)
-            http.Error(w, "Invalid borrow request ID", http.StatusBadRequest)
-            return
-        }
-        
-        log.Printf("Approving borrow request ID: %d for user ID: %d", id, userID)
+		// Get the borrow request ID from the URL
+		vars := mux.Vars(r)
+		id, err := strconv.Atoi(vars["id"])
+		if err != nil {
+			log.Printf("Invalid borrow request ID: %v", err)
+			http.Error(w, "Invalid borrow request ID: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		
+		log.Printf("Approving borrow request ID: %d for user ID: %d", id, userID)
 
-        // Find the borrow request
-        var borrowRequest models.BorrowRequest
-        if result := db.Preload("Item").First(&borrowRequest, id); result.Error != nil {
-            log.Printf("Borrow request not found: %v", result.Error)
-            http.Error(w, "Borrow request not found", http.StatusNotFound)
-            return
-        }
-        
-        log.Printf("Found borrow request: ID=%d, ItemID=%d, BuyerID=%d, Status=%s", 
-            borrowRequest.ID, borrowRequest.ItemID, borrowRequest.BuyerID, borrowRequest.Status)
+		// Find the borrow request
+		var borrowRequest models.BorrowRequest
+		if result := db.Preload("Item").First(&borrowRequest, id); result.Error != nil {
+			log.Printf("Borrow request not found: %v", result.Error)
+			http.Error(w, "Borrow request not found", http.StatusNotFound)
+			return
+		}
 
-        // Find the item
-        var item models.Item
-        if result := db.First(&item, borrowRequest.ItemID); result.Error != nil {
-            log.Printf("Item not found: %v", result.Error)
-            http.Error(w, "Item not found", http.StatusNotFound)
-            return
-        }
-        
-        log.Printf("Item details: ID=%d, SellerID=%d, Status=%s", 
-            item.ID, item.SellerID, item.Status)
+		// Check if the user is the seller of the item
+		if borrowRequest.Item.SellerID != userID {
+			log.Printf("User %d is not the seller of item %d", userID, borrowRequest.Item.ID)
+			http.Error(w, "You can only approve borrow requests for your own items", http.StatusForbidden)
+			return
+		}
 
-        // Check if the user is the seller of the item
-        if item.SellerID != userID {
-            log.Printf("User %d is not the seller of item %d (seller is %d)", 
-                userID, item.ID, item.SellerID)
-            http.Error(w, "You can only approve borrow requests for your own items", http.StatusForbidden)
-            return
-        }
+		// Check if the request is pending
+		if borrowRequest.Status != models.StatusPending {
+			log.Printf("Request %d is not pending (status: %s)", id, borrowRequest.Status)
+			http.Error(w, "Only pending requests can be approved", http.StatusBadRequest)
+			return
+		}
 
-        // Check if the request is pending
-        if borrowRequest.Status != models.StatusPending {
-            log.Printf("Request status is %s, not pending", borrowRequest.Status)
-            http.Error(w, "Only pending requests can be approved", http.StatusBadRequest)
-            return
-        }
+		// Update the borrow request status
+		borrowRequest.Status = models.StatusApproved
 
-        // Update the borrow request status
-        borrowRequest.Status = models.StatusApproved
+		// Update the item status
+		borrowRequest.Item.Status = models.StatusBorrowed
 
-        // Update the item status
-        item.Status = models.StatusBorrowed
+		// Save the changes in a transaction
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(&borrowRequest).Error; err != nil {
+				return err
+			}
+			if err := tx.Save(&borrowRequest.Item).Error; err != nil {
+				return err
+			}
+			return nil
+		})
 
-        // Save the changes in a transaction
-        err = db.Transaction(func(tx *gorm.DB) error {
-            if err := tx.Save(&borrowRequest).Error; err != nil {
-                log.Printf("Failed to save borrow request: %v", err)
-                return err
-            }
-            if err := tx.Save(&item).Error; err != nil {
-                log.Printf("Failed to save item: %v", err)
-                return err
-            }
-            return nil
-        })
+		if err != nil {
+			log.Printf("Failed to approve borrow request: %v", err)
+			http.Error(w, "Failed to approve borrow request: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("Successfully approved borrow request %d", id)
 
-        if err != nil {
-            log.Printf("Transaction failed: %v", err)
-            http.Error(w, "Failed to approve borrow request: "+err.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        log.Printf("Borrow request approved successfully: ID=%d", borrowRequest.ID)
-
-        // Return the updated borrow request
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(borrowRequest)
-    }
+		// Return the updated borrow request
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(borrowRequest)
+	}
 }
 
 func DenyBorrowRequest(db *gorm.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Get the user ID from the context
-        userID, ok := middleware.GetUserIDFromContext(r)
-        if !ok {
-            log.Println("User ID not found in context")
-            http.Error(w, "User ID not found in context", http.StatusUnauthorized)
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get the user ID from the context
+		userID, ok := middleware.GetUserIDFromContext(r)
+		if !ok {
+			log.Println("User ID not found in context")
+			http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+			return
+		}
 
-        // Get the borrow request ID from the URL
-        vars := mux.Vars(r)
-        idStr := vars["id"]
-        log.Printf("Request ID from URL: %s", idStr)
-        
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-            log.Printf("Invalid borrow request ID: %v", err)
-            http.Error(w, "Invalid borrow request ID", http.StatusBadRequest)
-            return
-        }
-        
-        log.Printf("Denying borrow request ID: %d for user ID: %d", id, userID)
+		// Get the borrow request ID from the URL
+		vars := mux.Vars(r)
+		id, err := strconv.Atoi(vars["id"])
+		if err != nil {
+			log.Printf("Invalid borrow request ID: %v", err)
+			http.Error(w, "Invalid borrow request ID: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		
+		log.Printf("Denying borrow request ID: %d for user ID: %d", id, userID)
 
-        // Find the borrow request
-        var borrowRequest models.BorrowRequest
-        if result := db.Preload("Item").First(&borrowRequest, id); result.Error != nil {
-            log.Printf("Borrow request not found: %v", result.Error)
-            http.Error(w, "Borrow request not found", http.StatusNotFound)
-            return
-        }
-        
-        log.Printf("Found borrow request: ID=%d, ItemID=%d, BuyerID=%d, Status=%s", 
-            borrowRequest.ID, borrowRequest.ItemID, borrowRequest.BuyerID, borrowRequest.Status)
+		// Find the borrow request
+		var borrowRequest models.BorrowRequest
+		if result := db.Preload("Item").First(&borrowRequest, id); result.Error != nil {
+			log.Printf("Borrow request not found: %v", result.Error)
+			http.Error(w, "Borrow request not found", http.StatusNotFound)
+			return
+		}
 
-        // Find the item
-        var item models.Item
-        if result := db.First(&item, borrowRequest.ItemID); result.Error != nil {
-            log.Printf("Item not found: %v", result.Error)
-            http.Error(w, "Item not found", http.StatusNotFound)
-            return
-        }
-        
-        log.Printf("Item details: ID=%d, SellerID=%d, Status=%s", 
-            item.ID, item.SellerID, item.Status)
+		// Check if the user is the seller of the item
+		if borrowRequest.Item.SellerID != userID {
+			log.Printf("User %d is not the seller of item %d", userID, borrowRequest.Item.ID)
+			http.Error(w, "You can only deny borrow requests for your own items", http.StatusForbidden)
+			return
+		}
 
-        // Check if the user is the seller of the item
-        if item.SellerID != userID {
-            log.Printf("User %d is not the seller of item %d (seller is %d)", 
-                userID, item.ID, item.SellerID)
-            http.Error(w, "You can only deny borrow requests for your own items", http.StatusForbidden)
-            return
-        }
+		// Check if the request is pending
+		if borrowRequest.Status != models.StatusPending {
+			log.Printf("Request %d is not pending (status: %s)", id, borrowRequest.Status)
+			http.Error(w, "Only pending requests can be denied", http.StatusBadRequest)
+			return
+		}
 
-        // Check if the request is pending
-        if borrowRequest.Status != models.StatusPending {
-            log.Printf("Request status is %s, not pending", borrowRequest.Status)
-            http.Error(w, "Only pending requests can be denied", http.StatusBadRequest)
-            return
-        }
+		// Update the borrow request status
+		borrowRequest.Status = models.StatusDenied
 
-        // Update the borrow request status
-        borrowRequest.Status = models.StatusDenied
+		// Save the changes
+		if result := db.Save(&borrowRequest); result.Error != nil {
+			log.Printf("Failed to deny borrow request: %v", result.Error)
+			http.Error(w, "Failed to deny borrow request: "+result.Error.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("Successfully denied borrow request %d", id)
 
-        // Save the changes
-        if result := db.Save(&borrowRequest); result.Error != nil {
-            log.Printf("Failed to save borrow request: %v", result.Error)
-            http.Error(w, "Failed to deny borrow request: "+result.Error.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        log.Printf("Borrow request denied successfully: ID=%d", borrowRequest.ID)
-
-        // Return the updated borrow request
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(borrowRequest)
-    }
+		// Return the updated borrow request
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(borrowRequest)
+	}
 }
 
 func GetMyBorrowRequests(db *gorm.DB) http.HandlerFunc {
@@ -315,43 +277,49 @@ func GetMyBorrowRequests(db *gorm.DB) http.HandlerFunc {
 }
 
 func GetRequestsForMyItems(db *gorm.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Get the user ID from the context
-        userID, ok := middleware.GetUserIDFromContext(r)
-        if !ok {
-            log.Println("User ID not found in context")
-            http.Error(w, "User ID not found in context", http.StatusUnauthorized)
-            return
-        }
-        
-        log.Printf("Fetching borrow requests for user ID: %d", userID)
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get the user ID from the context
+		userID, ok := middleware.GetUserIDFromContext(r)
+		if !ok {
+			log.Println("User ID not found in context")
+			http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+			return
+		}
+		
+		log.Printf("Fetching borrow requests for user ID: %d", userID)
 
-        // Find all borrow requests for the user's items
-        var borrowRequests []models.BorrowRequest
-        if result := db.Joins("JOIN items ON borrow_requests.item_id = items.id").
-            Where("items.seller_id = ?", userID).
-            Preload("Item").
-            Preload("Buyer").
-            Find(&borrowRequests); result.Error != nil {
-            log.Printf("Failed to fetch borrow requests: %v", result.Error)
-            http.Error(w, "Failed to fetch borrow requests: "+result.Error.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        log.Printf("Found %d borrow requests for user ID %d", len(borrowRequests), userID)
-        
-        // Log the first few requests for debugging
-        if len(borrowRequests) > 0 {
-            for i, req := range borrowRequests {
-                if i < 3 { // Log only the first 3 requests to avoid flooding the logs
-                    log.Printf("Request %d: ID=%d, ItemID=%d, BuyerID=%d, Status=%s", 
-                        i, req.ID, req.ItemID, req.BuyerID, req.Status)
-                }
-            }
-        }
+		// Find all borrow requests for the user's items
+		var borrowRequests []models.BorrowRequest
+		if result := db.Joins("JOIN items ON borrow_requests.item_id = items.id").
+			Where("items.seller_id = ?", userID).
+			Preload("Item").
+			Preload("Buyer").
+			Find(&borrowRequests); result.Error != nil {
+			log.Printf("Failed to fetch borrow requests: %v", result.Error)
+			http.Error(w, "Failed to fetch borrow requests: "+result.Error.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("Found %d borrow requests for user ID %d", len(borrowRequests), userID)
+		
+		// Log the first few requests for debugging
+		if len(borrowRequests) > 0 {
+			for i, req := range borrowRequests {
+				if i < 3 { // Log only the first 3 requests to avoid flooding the logs
+					log.Printf("Request %d: ID=%d, ItemID=%d, BuyerID=%d, Status=%s", 
+						i, req.ID, req.ItemID, req.BuyerID, req.Status)
+				}
+			}
+		}
 
-        // Return the borrow requests
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(borrowRequests)
-    }
+		// Set the content type header
+		w.Header().Set("Content-Type", "application/json")
+		
+		// Encode the response
+		if err := json.NewEncoder(w).Encode(borrowRequests); err != nil {
+			log.Printf("Error encoding response: %v", err)
+			http.Error(w, "Error encoding response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 }

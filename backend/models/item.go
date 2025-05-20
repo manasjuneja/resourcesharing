@@ -1,27 +1,20 @@
 package models
 
 import (
-
-	"gorm.io/gorm"
-)
-
-type ItemStatus string
-
-const (
-	StatusAvailable ItemStatus = "available"
-	StatusBorrowed  ItemStatus = "borrowed"
+	"time"
 )
 
 type Item struct {
-    gorm.Model
-    Title       string     `gorm:"not null" json:"title"`
-    Description string     `json:"description"`
-    Category    string     `gorm:"not null" json:"category"`
-    ImageURL    string     `json:"imageUrl"`
-    Status      ItemStatus `gorm:"not null;default:'available'" json:"status"`
-    Location    string     `json:"location"`
-    Duration    int        `gorm:"not null" json:"duration"` // Duration in days
-    SellerID    uint       `gorm:"not null" json:"sellerId"`
-    Seller      User       `json:"seller,omitempty"`
-    Requests    []BorrowRequest `json:"requests,omitempty"`
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Title       string    `json:"title" gorm:"not null"`
+	Description string    `json:"description"`
+	Category    string    `json:"category"`
+	ImageURL    string    `json:"imageUrl"`
+	Status      Status    `json:"status" gorm:"not null"`
+	Location    string    `json:"location"`
+	Duration    int       `json:"duration" gorm:"default:7"`
+	SellerID    uint      `json:"sellerId" gorm:"not null"`
+	Seller      User      `json:"seller" gorm:"foreignKey:SellerID"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }

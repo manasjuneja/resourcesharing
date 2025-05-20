@@ -1,23 +1,15 @@
 package models
 
 import (
-
-	"gorm.io/gorm"
-)
-
-type UserRole string
-
-const (
-	RoleSeller UserRole = "seller"
-	RoleBuyer  UserRole = "buyer"
+	"time"
 )
 
 type User struct {
-    gorm.Model
-    Email     string   `gorm:"uniqueIndex;not null" json:"email"`
-    Password  string   `gorm:"not null" json:"-"`
-    Name      string   `gorm:"not null" json:"name"`
-    Role      UserRole `gorm:"not null" json:"role"`
-    Items     []Item   `gorm:"foreignKey:SellerID" json:"items,omitempty"`
-    Requests  []BorrowRequest `gorm:"foreignKey:BuyerID" json:"requests,omitempty"`
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	Name      string    `json:"name" gorm:"not null"`
+	Email     string    `json:"email" gorm:"unique;not null"`
+	Password  string    `json:"-" gorm:"not null"` // Don't include password in JSON
+	Role      Role      `json:"role" gorm:"not null"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
